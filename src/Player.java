@@ -114,8 +114,20 @@ class Player {
             double maxVal = -100000000;
             Bird b = pState.getBird(i);
             int[] obsSeq = new int[b.getSeqLength()];
+            boolean dead = false;
             for (int j = 0; j < obsSeq.length; j++) {
-                obsSeq[j] = b.getObservation(j);
+                int obs = b.getObservation(j);
+                if (obs == Constants.MOVE_DEAD) {
+                    lGuess[i] = Constants.SPECIES_UNKNOWN;
+                    dead = true;
+                    break;
+                }
+
+                obsSeq[j] = obs;
+            }
+            if (dead) {
+                lGuess[i] = Constants.SPECIES_UNKNOWN;
+                continue;
             }
             for (BirdModel birdModel : birdModelGuesses.values()) {
 //                System.err.println("birdtype: " + birdModel.birdType);
