@@ -15,7 +15,7 @@ class BirdModel {
 
     private void initModel() {
         model = new HMMModel(InitializeModel.generateRandomMatrix(), InitializeModel.generateRandomMatrix(),
-            InitializeModel.generateRandomRow(10));
+                InitializeModel.generateRandomRow(5));
     }
 
     void addSequence(int[] sequence) {
@@ -29,9 +29,12 @@ class BirdModel {
 
 class Player {
     HashMap<Integer, BirdModel> birdModelGuesses = new HashMap<>();
+    HashMap<Bird, Boolean> hasTriedToShoot = new HashMap<>();
     // bird, round, obs seq
     int t = 0;
     int timePeriod = 100;
+    int timeBreak = 5;
+    int[] simsteps;
 
     public Player() {
     }
@@ -51,68 +54,101 @@ class Player {
      * @param pDue time before which we must have returned
      * @return the prediction of a bird we want to shoot at, or cDontShoot to pass
      */
-    public Action shoot(GameState pState, Deadline pDue) {
 
-        if (t < 80 || pState.getRound() < 5) {
+    private void initShootHash(GameState pState) {
+        for (int i = 0; i < pState.getNumBirds(); i++) {
+            hasTriedToShoot.put(pState.getBird(i), false);
+        }
+    }
+    public Action shoot(GameState pState, Deadline pDue) {
+        if (t == 0) {
+            simsteps = new int[pState.getNumBirds()];
+            initShootHash(pState);
+        }
+        if (t < 30 || pState.getRound() < 2) {
             t++;
             return cDontShoot;
         }
 
         for (int i = 0; i < pState.getNumBirds(); i++) {
-            if (pDue.remainingMs() > 250) {
+            if (pDue.remainingMs() > timeBreak) {
                 Bird bird = pState.getBird(i);
-                int[] obsSeq = getBirdSeqUntilDeath(bird);
-                BirdModel blackStorkModel = birdModelGuesses.get(Constants.SPECIES_BLACK_STORK);
-                BirdModel maxBirdModel = null;
-                if (blackStorkModel == null) {
-                    //Här har vi inte en modell för BS - Kanske inte skjuta?
-                    return cDontShoot;
-                } else {
-                    double max = -10000000;
-                    for (BirdModel birdModel : birdModelGuesses.values()) {
-                        double prob = birdModel.model.logProbForObsSeq(obsSeq);
-                        if (prob > max) {
-                            maxBirdModel = birdModel;
-                            max = prob;
+                if (bird.isAlive() && !hasTriedToShoot.get(bird)) {
+                    int[] obsSeq = getBirdSeqUntilDeath(bird);
+                    if (!isCloseToAnotherSpecie(pState, obsSeq))
+                        break;
+                    BirdModel blackStorkModel = birdModelGuesses.get(Constants.SPECIES_BLACK_STORK);
+                    BirdModel maxBirdModel = null;
+                    double prob = -100000000;
+                    if (blackStorkModel == null) {
+                        //Här har vi inte en modell för BS - Kanske inte skjuta?
+                        //return cDontShoot;
+                    } else {
+
+                        double logProb = blackStorkModel.model.logProbForObsSeq(obsSeq);
+                        double threshold = -200;
+                        if (logProb > threshold) {
+                            return cDontShoot;
+                        }
+
+                    }
+                    if (t > 0 && t > bird.getSeqLength()) {
+                        if (bird.getObservation(t - 1) == bird.getObservation(t))
+                            simsteps[i]++;
+                        else
+                            simsteps[i] = 0;
+                        if (simsteps[i] > 15)
+                            return new Action(i, bird.getObservation(t));
+                    }
+
+                    if (pDue.remainingMs() < timeBreak)
+                        break;
+
+                    //Träna modell
+                    HMMModel initModel = generateInitModel();
+                    ArrayList<int[]> obsSeqArrayList = new ArrayList<>();
+                    obsSeqArrayList.add(obsSeq);
+                    //obsSeqArrayList.addAll(maxBirdModel.savedSequences);
+                    BaumWelch bw = new BaumWelch(initModel, obsSeqArrayList);
+                    bw.run();
+
+                    double[][] alpha = bw.model.getAlpha(obsSeq).m;
+                    double[] obsProbs = bw.model.obsProbsNextStep(alpha);
+                    double maxVal = -1000000000;
+                    int maxO = -1;
+                    for (int o = 0; o < obsProbs.length; o++) {
+                        if (pDue.remainingMs() < timeBreak)
+                            break;
+                        if (obsProbs[o] > maxVal) {
+                            maxVal = obsProbs[o];
+                            maxO = o;
                         }
                     }
-                    double logProb = blackStorkModel.model.logProbForObsSeq(obsSeq);
-                    double threshold = -450;
-                    if (logProb > threshold && max < -100) {
-                        return cDontShoot;
+                    if (maxVal > 0.8 && maxO != Constants.MOVE_DEAD) {
+                        System.err.println("trying to shoot bird " + i + " in round " + pState.getRound());
+                        hasTriedToShoot.put(bird, true);
+                        return new Action(i, maxO);
+                        //System.err.println("maxVal is " + maxVal + " with sequence : " + Arrays.toString(obsProbs));
                     }
                 }
 
-
-                //Träna modell
-                HMMModel initModel = generateInitModel();
-                ArrayList<int[]> obsSeqArrayList = new ArrayList<>();
-                obsSeqArrayList.add(obsSeq);
-                obsSeqArrayList.addAll(maxBirdModel.savedSequences);
-                BaumWelch bw = new BaumWelch(initModel, obsSeqArrayList);
-                bw.run();
-
-                double[][] alpha = bw.model.getAlpha(obsSeq).m;
-                double[] obsProbs = bw.model.obsProbsNextStep(alpha);
-                double maxVal = Double.MIN_VALUE;
-                int maxO = -1;
-                for (int o = 0; o < obsProbs.length; o++) {
-                    if (obsProbs[o] > maxVal) {
-                        maxVal = obsProbs[o];
-                        maxO = o;
-                    }
-                }
-                if (maxVal > 0.8) {
-
-                    return new Action(i, maxO);
-                    //System.err.println("maxVal is " + maxVal + " with sequence : " + Arrays.toString(obsProbs));
-                }
             } else {
                 break;
             }
         }
         t++;
         return cDontShoot;
+    }
+
+    public boolean isCloseToAnotherSpecie(GameState pState, int[] obsSeq) {
+        for (BirdModel birdModel : birdModelGuesses.values()) {
+            if (birdModel.birdType != Constants.SPECIES_BLACK_STORK) {
+                if (birdModel.model.logProbForObsSeq(obsSeq) > -200) {
+                    return true;
+                }
+            }
+        }
+        return false;
     }
 
     /**
@@ -166,7 +202,8 @@ class Player {
      * @param pDue time before which we must have returned
      */
     public void hit(GameState pState, int pBird, Deadline pDue) {
-
+        System.err.println("Hit bird " + pBird);
+        pState.getBird(pBird).kill();
         if(pBird == Constants.SPECIES_BLACK_STORK) {
             System.err.println("Hit black stork!");
         }
@@ -191,7 +228,7 @@ class Player {
 
     private HMMModel generateInitModel() {
         return new HMMModel(InitializeModel.generateRandomMatrix(), InitializeModel.generateRandomMatrix(),
-            InitializeModel.generateRandomRow(10));
+                InitializeModel.generateRandomRow(5));
     }
 
     private ArrayList<Integer> arrayToArraylist(int[] l) {
@@ -212,6 +249,8 @@ class Player {
      */
     public void reveal(GameState pState, int[] pSpecies, Deadline pDue) {
         for (int i = 0; i < pSpecies.length; i++) {
+            if (pDue.remainingMs() < timeBreak)
+                break;
             int birdType = pSpecies[i];
             if (birdType == Constants.SPECIES_UNKNOWN)
                 continue;
@@ -229,6 +268,8 @@ class Player {
 
         //Räkna Baum welch
         for(BirdModel bm : birdModelGuesses.values()) {
+            if (pDue.remainingMs() < timeBreak)
+                break;
             int seqCount = bm.savedSequences.size();
             if (seqCount > 0) {
 //                int[][] obsSeqs = bm.savedSequences.toArray(new int[seqCount][timePeriod]);

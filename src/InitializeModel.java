@@ -20,7 +20,7 @@ public class InitializeModel {
   }
 
   static double[][] generateRandomMatrix() {
-    int rowCount = 10;
+    int rowCount = 5;
     int colCount = 10;
     double[][] matrix = new double[rowCount][colCount];
     for (int i = 0; i < rowCount; i++) {
@@ -28,15 +28,4 @@ public class InitializeModel {
     }
     return matrix;
   }
-//
-//  public static void main(String[] args) {
-//    double[] row = generateRandomRow(10);
-//    double sum = 0;
-//    MatrixUtils.prettyPrint(generateRandomMatrix());
-////    for (int i = 0; i < 10; i++) {
-////      System.out.println(row[i]);
-////      sum += row[i];
-////    }
-////    System.out.println("sum: " + sum);
-//  }
 }
