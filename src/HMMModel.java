@@ -1,3 +1,4 @@
+import javax.sql.rowset.serial.SerialRef;
 import java.util.Arrays;
 
 public class HMMModel {
@@ -12,10 +13,23 @@ public class HMMModel {
     m = b[0].length;
   }
 
-  private double[] alphaPass(int[] obsSeq) {
+  public class Alpha {
+    public double[][] m;
+    public double[] cs;
+
+    public Alpha(double[][] m, double[] cs){
+      this.m = m;
+      this.cs = cs;
+    }
+  }
+
+  public double[] alphaPass(int[] obsSeq) {
+    return getAlpha(obsSeq).cs;
+  }
+
+  public Alpha getAlpha(int[] obsSeq) {
     int maxT = obsSeq.length;
     double[] cs = new double[maxT];
-
     double[][] alpha = new double[maxT][n];
 
     // compute alpha[0]
@@ -38,8 +52,6 @@ public class HMMModel {
         alpha[t][i] *= b[i][obsSeq[t]];
         cs[t] += alpha[t][i];
       }
-      if (cs[t] == 0)
-        System.out.println(t);
 
       // scale alpha[t]
       cs[t] = 1/cs[t];
@@ -47,7 +59,7 @@ public class HMMModel {
         alpha[t][i] *= cs[t];
     }
 
-    return cs;
+    return new Alpha(alpha, cs);
   }
 
   public double logProbForObsSeq(int[] obsSeq) {
@@ -56,5 +68,27 @@ public class HMMModel {
     for (double c : cs)
       logProb += Math.log(c);
     return -logProb;
+  }
+
+  public double[] obsProbsNextStep(double[][] alpha) {
+    double[] obsList = new double[Constants.COUNT_MOVE];
+    for (int o = 0; o < Constants.COUNT_MOVE; o++) {
+      double probForObs = 0;
+      for(int i = 0; i < alpha[alpha.length-1].length; i++) {
+        probForObs += obsProbForAlphaIGivenObs(i, o, alpha);
+      }
+      obsList[o] = probForObs;
+    }
+    return obsList;
+  }
+
+  private double obsProbForAlphaIGivenObs(int i, int obs, double[][] alpha) {
+    double[] lastAlphaRow = alpha[alpha.length-1];
+    double obsProb = 0;
+    //iterate through last alpha
+    for(int j = 0; j < lastAlphaRow.length; j++){
+      obsProb += lastAlphaRow[j] * a[j][i] * b[i][obs];
+    }
+    return obsProb;
   }
 }

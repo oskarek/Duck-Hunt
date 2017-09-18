@@ -1,4 +1,5 @@
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 
 class BirdModel {
@@ -52,43 +53,66 @@ class Player {
      */
     public Action shoot(GameState pState, Deadline pDue) {
 
-//        if (t < 30) {
-//            t++;
-//            return cDontShoot;
-//        }
-//        if (true) {
-//            HMMModel[] models = new HMMModel[pState.getNumBirds()];
-//            for (int b = 0; b < pState.getNumBirds(); b++) {
-//                Bird bird = pState.getBird(b);
-//                int[] obsSeq = new int[bird.getSeqLength()];
-//                for (int i = 0; i < bird.getSeqLength(); i++) {
-//                    birdSeqs[b][i*pState.getRound()] = bird.getObservation(i);
-//                }
-//                HMMModel model = new HMMModel(InitializeModel.generateRandomMatrix(), InitializeModel.generateRandomMatrix(),
-//                    InitializeModel.generateRandomRow(10));
-//                BaumWelch bw = new BaumWelch(model, obsSeq, 10, 10);
-//                bw.run();
-//                models[b] = bw.model;
-//            }
-//
-//            for (int m = 0 ; m<models.length; m++) {
-//                for (int o = 0; o<models.length; o++) {
-//                    double dist = MatrixUtils.distance(models[m].b, models[o].b);
-//                    System.err.println("Distance between bird " + m + " and " + o + " : " + dist);
-//                }
-//            }
-//        }
-        /*
-         * Here you should write your clever algorithms to get the best action.
-         * This skeleton never shoots.
-         */
+        if (t < 80 || pState.getRound() < 5) {
+            t++;
+            return cDontShoot;
+        }
+
+        for (int i = 0; i < pState.getNumBirds(); i++) {
+            if (pDue.remainingMs() > 250) {
+                Bird bird = pState.getBird(i);
+                int[] obsSeq = getBirdSeqUntilDeath(bird);
+                BirdModel blackStorkModel = birdModelGuesses.get(Constants.SPECIES_BLACK_STORK);
+                BirdModel maxBirdModel = null;
+                if (blackStorkModel == null) {
+                    //Här har vi inte en modell för BS - Kanske inte skjuta?
+                    return cDontShoot;
+                } else {
+                    double max = -10000000;
+                    for (BirdModel birdModel : birdModelGuesses.values()) {
+                        double prob = birdModel.model.logProbForObsSeq(obsSeq);
+                        if (prob > max) {
+                            maxBirdModel = birdModel;
+                            max = prob;
+                        }
+                    }
+                    double logProb = blackStorkModel.model.logProbForObsSeq(obsSeq);
+                    double threshold = -450;
+                    if (logProb > threshold && max < -100) {
+                        return cDontShoot;
+                    }
+                }
+
+
+                //Träna modell
+                HMMModel initModel = generateInitModel();
+                ArrayList<int[]> obsSeqArrayList = new ArrayList<>();
+                obsSeqArrayList.add(obsSeq);
+                obsSeqArrayList.addAll(maxBirdModel.savedSequences);
+                BaumWelch bw = new BaumWelch(initModel, obsSeqArrayList);
+                bw.run();
+
+                double[][] alpha = bw.model.getAlpha(obsSeq).m;
+                double[] obsProbs = bw.model.obsProbsNextStep(alpha);
+                double maxVal = Double.MIN_VALUE;
+                int maxO = -1;
+                for (int o = 0; o < obsProbs.length; o++) {
+                    if (obsProbs[o] > maxVal) {
+                        maxVal = obsProbs[o];
+                        maxO = o;
+                    }
+                }
+                if (maxVal > 0.8) {
+
+                    return new Action(i, maxO);
+                    //System.err.println("maxVal is " + maxVal + " with sequence : " + Arrays.toString(obsProbs));
+                }
+            } else {
+                break;
+            }
+        }
         t++;
         return cDontShoot;
-        // This line chooses not to shoot.
-        // return cDontShoot;
-
-        // This line would predict that bird 0 will move right and shoot at it.
-        // return Action(0, MOVE_RIGHT);
     }
 
     /**
@@ -113,19 +137,8 @@ class Player {
             int specie = 0;
             double maxVal = -100000000;
             Bird b = pState.getBird(i);
-            int[] obsSeq = new int[b.getSeqLength()];
-            boolean dead = false;
-            for (int j = 0; j < obsSeq.length; j++) {
-                int obs = b.getObservation(j);
-                if (obs == Constants.MOVE_DEAD) {
-                    lGuess[i] = Constants.SPECIES_UNKNOWN;
-                    dead = true;
-                    break;
-                }
-
-                obsSeq[j] = obs;
-            }
-            if (dead) {
+            int[] obsSeq = getBirdSeqUntilDeath(b);
+            if (obsSeq.length == 0) {
                 lGuess[i] = Constants.SPECIES_UNKNOWN;
                 continue;
             }
@@ -153,7 +166,40 @@ class Player {
      * @param pDue time before which we must have returned
      */
     public void hit(GameState pState, int pBird, Deadline pDue) {
-        System.err.println("HIT BIRD!!!");
+
+        if(pBird == Constants.SPECIES_BLACK_STORK) {
+            System.err.println("Hit black stork!");
+        }
+
+    }
+
+    private int[] getBirdSeqUntilDeath(Bird bird) {
+        ArrayList<Integer> obsList = new ArrayList<>();
+        for (int i = 0; i < bird.getSeqLength(); i++) {
+            int obs = bird.getObservation(i);
+            if (obs == Constants.MOVE_DEAD) {
+                break;
+            }
+            obsList.add(obs);
+        }
+        int[] obsSeq = new int[obsList.size()];
+        for (int i = 0; i < obsList.size(); i++) {
+            obsSeq[i] = obsList.get(i);
+        }
+        return obsSeq;
+    }
+
+    private HMMModel generateInitModel() {
+        return new HMMModel(InitializeModel.generateRandomMatrix(), InitializeModel.generateRandomMatrix(),
+            InitializeModel.generateRandomRow(10));
+    }
+
+    private ArrayList<Integer> arrayToArraylist(int[] l) {
+        ArrayList<Integer> arrayList = new ArrayList<>(l.length);
+        for (int i = 0; i < l.length; i++) {
+            arrayList.add(l[i]);
+        }
+        return arrayList;
     }
 
     /**
@@ -172,10 +218,7 @@ class Player {
 
             BirdModel bm = birdModelGuesses.get(birdType);
             Bird bird = pState.getBird(i);
-            int[] obsSeq = new int[bird.getSeqLength()];
-            for (int s = 0;  s < bird.getSeqLength(); s++) {
-                obsSeq[s] = bird.getObservation(s);
-            }
+            int[] obsSeq = getBirdSeqUntilDeath(bird);
             if (bm == null) {
                 birdModelGuesses.put(birdType, new BirdModel(birdType));
             }
@@ -188,9 +231,9 @@ class Player {
         for(BirdModel bm : birdModelGuesses.values()) {
             int seqCount = bm.savedSequences.size();
             if (seqCount > 0) {
-                int[][] obsSeqs = bm.savedSequences.toArray(new int[seqCount][timePeriod]);
+//                int[][] obsSeqs = bm.savedSequences.toArray(new int[seqCount][timePeriod]);
 
-                BaumWelch bw = new BaumWelch(bm.model, obsSeqs);
+                BaumWelch bw = new BaumWelch(bm.model, bm.savedSequences);
                 bw.run();
 //                bm.emptySavedSequences();
             }

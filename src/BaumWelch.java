@@ -1,3 +1,4 @@
+import java.util.ArrayList;
 import java.util.Arrays;
 
 class Package {
@@ -24,13 +25,13 @@ public class BaumWelch {
   private int n, m;
   private Package[] packs;
 
-  public BaumWelch(HMMModel initialModel, int[][] obsSeqs) {
+  public BaumWelch(HMMModel initialModel, ArrayList<int[]> obsSeqs) {
     this.model = initialModel;
     this.n = initialModel.n;
     this.m = initialModel.m;
-    packs = new Package[obsSeqs.length];
-    for (int i = 0; i < obsSeqs.length; i++)
-      packs[i] = new Package(obsSeqs[i], n);
+    packs = new Package[obsSeqs.size()];
+    for (int i = 0; i < obsSeqs.size(); i++)
+      packs[i] = new Package(obsSeqs.get(i), n);
   }
 
   private void alphaPass(Package pack) {
